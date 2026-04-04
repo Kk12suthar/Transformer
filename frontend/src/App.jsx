@@ -1078,7 +1078,7 @@ export default function App() {
       <div className="auth-shell">
         <div className="ambient ambient-a" /><div className="ambient ambient-b" />
         <form className="auth-card fade-in" onSubmit={handleAuthSubmit}>
-          <div className="auth-logo">
+          <div className="auth-logo" onClick={() => setShowLanding(true)} style={{cursor: 'pointer'}} title="Return to Home">
             <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
               <rect width="28" height="28" rx="8" fill="url(#ag)" />
               <path d="M14 3 L5 15 L13 15 L14 25 L23 13 L15 13 Z" fill="#fff" />
