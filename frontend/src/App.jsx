@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8100";
 const TOKEN_KEY = "mvp_token";
@@ -703,7 +703,52 @@ function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
   );
 }
 
+function LandingPage({ onGetStarted }) {
+  return (
+    <div className="landing-wrap">
+      <div className="ambient ambient-a" />
+      <div className="ambient ambient-b" />
+      
+      <header className="landing-nav">
+        <div className="brand">
+          <svg width="32" height="32" viewBox="0 0 28 28" fill="none">
+            <rect width="28" height="28" rx="8" fill="url(#ag3)" />
+            <path d="M14 3 L5 15 L13 15 L14 25 L23 13 L15 13 Z" fill="#fff" />
+            <defs><linearGradient id="ag3" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#6C63FF" /><stop offset="1" stopColor="#00C6FF" /></linearGradient></defs>
+          </svg>
+          <span className="brand-name" style={{fontSize: "1.4rem"}}>Transformer</span>
+        </div>
+        <button className="btn-ghost" onClick={onGetStarted}>Sign In</button>
+      </header>
+
+      <main className="landing-main">
+        <section className="hero-section">
+          <h1 className="hero-title">Welcome to <span className="text-gradient">Transformer</span></h1>
+          <p className="hero-sub">The ultimate Agentic table cleaning & transformation workspace.</p>
+          <button className="btn-primary main-cta" onClick={onGetStarted}>Get Started for Free</button>
+        </section>
+
+        <section className="grid-section">
+          <div className="glass-card">
+            <h3>⚙️ How It Works</h3>
+            <p>Upload your messy CSVs and Excels. Our autonomous AI pipelines instantly parse, clean, and transform columns exactly how you instruct them via plain English.</p>
+          </div>
+          <div className="glass-card">
+            <h3>🚀 The Impact</h3>
+            <p>Turn hours of manual spreadsheet formatting into seconds of automated processing. Focus on the insights, let Transformer handle the data janitorial work securely.</p>
+          </div>
+          <div className="glass-card">
+            <h3>💻 Tech Stack</h3>
+            <p>Built for scale with <strong>React + Vite</strong> on the frontend, powered by <strong>Python FastAPI</strong> and <strong>SQLAlchemy</strong> on the backend. Data resides safely in <strong>PostgreSQL</strong> via an MCP Agent interface.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
 export default function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   const [user, setUser] = useState(() => parseStoredUser());
   const [authMode, setAuthMode] = useState("signin");
@@ -1025,19 +1070,23 @@ export default function App() {
 
   // â”€â”€ Auth screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (!token) {
+    if (showLanding) {
+      return <LandingPage onGetStarted={() => setShowLanding(false)} />;
+    }
+
     return (
       <div className="auth-shell">
         <div className="ambient ambient-a" /><div className="ambient ambient-b" />
-        <form className="auth-card" onSubmit={handleAuthSubmit}>
+        <form className="auth-card fade-in" onSubmit={handleAuthSubmit}>
           <div className="auth-logo">
             <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
               <rect width="28" height="28" rx="8" fill="url(#ag)" />
-              <path d="M8 20 14 8l6 12" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M14 3 L5 15 L13 15 L14 25 L23 13 L15 13 Z" fill="#fff" />
               <defs><linearGradient id="ag" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-                <stop stopColor="#10a37f" /><stop offset="1" stopColor="#3e95d8" />
+                <stop stopColor="#6C63FF" /><stop offset="1" stopColor="#00C6FF" />
               </linearGradient></defs>
             </svg>
-            <h1>ProjectX MVP</h1>
+            <h1>Transformer</h1>
           </div>
           <p>Agentic table cleaning &amp; transformation workspace.</p>
           <div className="auth-tabs">
@@ -1049,7 +1098,7 @@ export default function App() {
           <label>Password<input type="password" minLength={8} required value={authForm.password} onChange={(e) => setAuthForm((p) => ({ ...p, password: e.target.value }))} /></label>
           {error && <div className="banner is-error">{error}</div>}
           <button className="btn-primary auth-submit" type="submit" disabled={authBusy}>
-            {authBusy ? "Please waitâ€¦" : authMode === "signin" ? "Enter Workspace" : "Create Account"}
+            {authBusy ? "Please wait…" : authMode === "signin" ? "Enter Workspace" : "Create Account"}
           </button>
         </form>
       </div>
@@ -1083,12 +1132,12 @@ export default function App() {
           <div className="brand">
             <svg width="20" height="20" viewBox="0 0 28 28" fill="none">
               <rect width="28" height="28" rx="8" fill="url(#ag2)" />
-              <path d="M8 20 14 8l6 12" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M14 3 L5 15 L13 15 L14 25 L23 13 L15 13 Z" fill="#fff" />
               <defs><linearGradient id="ag2" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-                <stop stopColor="#10a37f" /><stop offset="1" stopColor="#3e95d8" />
+                <stop stopColor="#6C63FF" /><stop offset="1" stopColor="#00C6FF" />
               </linearGradient></defs>
             </svg>
-            {sidebarOpen && <span className="brand-name">ProjectX</span>}
+            {sidebarOpen && <span className="brand-name">Transformer</span>}
           </div>
           <button className="collapse-btn" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}>
             <IconCollapseLeft collapsed={!sidebarOpen} />
