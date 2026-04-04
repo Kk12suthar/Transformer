@@ -1,0 +1,69 @@
+name: CD
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  package-artifacts:
+    name: Package deployable artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # We still build in CD so the artifacts are known-good.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate backend package
+        working-directory: backend
+        run: |
+          python -m compileall app
+          python -m py_compile run.py
+
+      # This is continuous delivery, not full deployment yet.
+      # The workflow produces artifacts that are ready to deploy later
+      # to a target such as Render, Railway, Azure, or a VM.
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-package
+          path: |
+            backend/app
+            backend/run.py
+            backend/requirements.txt
+            backend/.env.example
+            backend/README.md
+            README.md
