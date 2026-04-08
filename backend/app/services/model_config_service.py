@@ -9,8 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 
-
-SUPPORTED_PROVIDERS = ("google", "openai", "anthropic")
 TRANSFORM_AGENT_ROLES = (
     "orchestrator",
     "search_agent",
@@ -18,6 +16,7 @@ TRANSFORM_AGENT_ROLES = (
     "operations_agent",
 )
 DEFAULT_MODELS = [{"model_name": "gemini-2.5-flash", "model_type": "google"}]
+DEFAULT_PROVIDERS = ("google", "openai", "anthropic")
 
 
 @dataclass
@@ -67,7 +66,7 @@ def _normalize_models(raw_models: list[dict[str, Any]] | None) -> list[dict[str,
     for model in incoming:
         name = str(model.get("model_name", "")).strip()
         provider = str(model.get("model_type", "")).strip().lower()
-        if not name or provider not in SUPPORTED_PROVIDERS:
+        if not name or not provider:
             continue
         key = name.lower()
         if key in seen:
@@ -144,15 +143,16 @@ def _get_db_config_row(db: Session, user_id: str) -> dict[str, Any] | None:
 
 def get_chat_model_config(db: Session, user_id: str) -> ChatModelConfig:
     row = _get_db_config_row(db, user_id)
-    provider_api_keys = {provider: "" for provider in SUPPORTED_PROVIDERS}
+    provider_api_keys = {provider: "" for provider in DEFAULT_PROVIDERS}
     all_models = [dict(DEFAULT_MODELS[0])]
     selected_model = DEFAULT_MODELS[0]["model_name"]
 
     if row:
         stored_keys = _as_dict(row["provider_api_keys"])
-        for provider in SUPPORTED_PROVIDERS:
-            raw = str(stored_keys.get(provider, "") or "")
-            provider_api_keys[provider] = raw
+        # Only merge existing default keys that might be empty, then add EVERYTHING from the DB
+        for provider, val in stored_keys.items():
+            provider_api_keys[provider] = str(val or "")
+        
         all_models = _normalize_models(_as_list(row["all_models"]))
         selected_model = _normalize_selected_model(
             row.get("selected_model"),
@@ -191,8 +191,6 @@ def upsert_chat_model_config(
 
     merged_provider_keys = dict(existing.provider_api_keys)
     for provider, incoming in provider_keys_input.items():
-        if provider not in SUPPORTED_PROVIDERS:
-            continue
         merged_provider_keys[provider] = _resolve_provider_key(
             incoming_value=incoming,
             existing_encrypted=existing.provider_api_keys.get(provider, ""),

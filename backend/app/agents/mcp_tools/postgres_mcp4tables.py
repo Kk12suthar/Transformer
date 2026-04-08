@@ -38,6 +38,7 @@ def get_db_config() -> dict:
         "user": os.getenv("POSTGRES_USER", "postgres"),
         "password": os.getenv("POSTGRES_PASSWORD", "imsuperuser"),
         "database": os.getenv("POSTGRES_DBNAME", "mvp"),
+        "sslmode": os.getenv("POSTGRES_SSLMODE", "prefer"),
         "app_schema": os.getenv("APP_SCHEMA", "mvp"),
         "uploads_schema": os.getenv("UPLOADS_SCHEMA", "uploads"),
         "session_id": os.getenv("MCP_SESSION_ID"),
@@ -57,6 +58,7 @@ def _get_pool() -> pool.SimpleConnectionPool:
             user=cfg["user"],
             password=cfg["password"],
             dbname=cfg["database"],
+            sslmode=cfg["sslmode"],
             connect_timeout=15,
         )
     return _POOL

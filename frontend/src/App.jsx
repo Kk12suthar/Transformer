@@ -89,6 +89,7 @@ function eventKind(type) {
   if (type === "completion" || type === "final_response") return "ok";
   if (type === "function_request") return "tool-req";
   if (type === "function_response") return "tool-res";
+  if (type === "agent_thinking") return "thinking";
   return "log";
 }
 
@@ -134,90 +135,21 @@ function traceDetail(event) {
     try {
       const r = typeof event.response === "object" ? event.response : JSON.parse(event.response);
       const s = JSON.stringify(r, null, 2);
-      return s.length > 320 ? s.slice(0, 320) + "â€¦" : s;
+      return s.length > 320 ? s.slice(0, 320) + "…" : s;
     } catch { return String(event.response).slice(0, 200); }
   }
   if (event.type === "error") return event.message || "";
   return null;
 }
 
-// â”€â”€ Trace Event Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function TraceEventCard({ event, isLast, isStreaming }) {
-  const [expanded, setExpanded] = useState(false);
-  const detail = traceDetail(event);
-  const hasDetail = !!detail;
-  const kind = eventKind(event.type);
-  const label = traceLabel(event);
+// ── Vertical Timeline Trace ────────────────────────────────────────────────────────────────────────────────────────────
 
-  return (
-    <div
-      className={`trace-card kind-${kind}${hasDetail ? " has-detail" : ""}`}
-      onClick={() => hasDetail && setExpanded((v) => !v)}
-      title={detail || label}
-      aria-label={label}
-      style={{ cursor: hasDetail ? "pointer" : "default" }}>
-      <div className="trace-card-header">
-        <span className={`trace-card-icon kind-${kind}`}>{traceIcon(event.type)}</span>
-        <span className="trace-card-label">{label}</span>
-        {isLast && isStreaming && event.type !== "completion" && (
-          <span className="trace-live-dot" />
-        )}
-        {hasDetail && (
-          <span className="trace-expand-caret" style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}>â€º</span>
-        )}
-      </div>
-      {expanded && detail && (
-        <pre className="trace-card-detail">{detail}</pre>
-      )}
-    </div>
-  );
-}
-
-// â”€â”€ Streaming Trace Block â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function StreamingTraceBlock({ events, isStreaming }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const completionEvent = events.find((e) => e.type === "completion");
-  const items = groupTraceEvents(events);
-  const toolTurns = items.filter((item) => item.type === "tool_turn" || item.type === "tool_orphan_response");
-
-  return (
-    <div className="streaming-trace-block">
-      <div className="stb-header" onClick={() => setCollapsed((v) => !v)}>
-        <span className="stb-icon">
-          {isStreaming ? <IconSpinner /> : <IconCheck />}
-        </span>
-        <span className="stb-title">
-          {isStreaming ? "Working…" : `Completed in ${completionEvent?.time_taken ?? "?"}s`}
-        </span>
-        <span className="stb-step-count">{toolTurns.length}</span>
-        <span className="stb-caret" style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>›</span>
-      </div>
-      {!collapsed && (
-        <div className="stb-events">
-          {items.length ? (
-            items.map((item, i) => {
-              if (item.type === "tool_turn" || item.type === "tool_orphan_response") {
-                return (
-                  <ToolTurnCard
-                    key={item.id}
-                    item={item}
-                    isStreaming={isStreaming}
-                    isLast={i === items.length - 1}
-                  />
-                );
-              }
-              return <TraceErrorRow key={item.id} item={item} />;
-            })
-          ) : (
-            <div className="trace-empty-state">
-              <IconSpinner />
-              <span>Waiting for tool activity…</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+function formatTraceTime(ts) {
+  if (!ts) return "";
+  try {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch { return ""; }
 }
 
 function traceToolName(event) {
@@ -261,6 +193,27 @@ function groupTraceEvents(events) {
       return;
     }
 
+    if (event.type === "agent_thinking") {
+      items.push({
+        id: `${index}-thinking-${items.length}`,
+        type: "thinking",
+        agent_name: event.agent_name || "Agent",
+        text: event.text || "",
+        timestamp: event.timestamp || event.ts || null,
+      });
+      return;
+    }
+
+    if (event.type === "agent_start") {
+      items.push({
+        id: `${index}-start-${items.length}`,
+        type: "agent_start",
+        agent_name: event.agent_name || "Agent",
+        timestamp: event.timestamp || event.ts || null,
+      });
+      return;
+    }
+
     if (event.type === "function_request") {
       const item = {
         id: `${index}-${event.tool_name || "tool"}-${items.length}`,
@@ -269,6 +222,7 @@ function groupTraceEvents(events) {
         agent_name: event.agent_name || "",
         request: event,
         response: null,
+        timestamp: event.timestamp || event.ts || null,
       };
       items.push(item);
       pendingTools.push(item);
@@ -281,15 +235,9 @@ function groupTraceEvents(events) {
       );
       if (matched) {
         matched.response = event;
+        matched.responseTimestamp = event.timestamp || event.ts || null;
         return;
       }
-      items.push({
-        id: `${index}-${event.tool_name || "tool"}-orphan`,
-        type: "tool_orphan_response",
-        tool_name: traceToolName(event),
-        agent_name: event.agent_name || "",
-        response: event,
-      });
       return;
     }
 
@@ -298,6 +246,7 @@ function groupTraceEvents(events) {
         id: `${index}-error`,
         type: "error",
         message: event.message || "Stream error",
+        timestamp: event.timestamp || event.ts || null,
       });
     }
   });
@@ -305,60 +254,161 @@ function groupTraceEvents(events) {
   return items;
 }
 
-function toolTraceIcon(type, running) {
-  if (type === "function_request") return running ? <IconSpinner /> : <IconTool />;
-  if (type === "function_response") return <IconToolResponse />;
-  if (type === "error") return <IconErrorSmall />;
-  return running ? <IconSpinner /> : <IconCheck />;
-}
-
-function ToolTurnCard({ item, isStreaming, isLast }) {
-  const running = !item.response && isStreaming;
-  const requestText = traceRequestText(item.request);
-  const responseText = item.response ? traceResponseText(item.response) : "";
+function StreamingTraceBlock({ events, isStreaming }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const completionEvent = events.find((e) => e.type === "completion");
+  const items = groupTraceEvents(events);
+  const toolCount = items.filter((item) => item.type === "tool_turn").length;
 
   return (
-    <div className={`tool-turn-card${running ? " is-running" : ""}${item.response ? " is-complete" : ""}${isLast && isStreaming ? " is-live" : ""}`}>
-      <div className="tool-turn-head">
-        <span className={`tool-turn-icon${running ? " is-running" : ""}`}>
-          {toolTraceIcon("function_request", running)}
+    <div className="streaming-trace-block">
+      <div className="stb-header" onClick={() => setCollapsed((v) => !v)}>
+        <span className="stb-icon">
+          {isStreaming ? <IconSpinner /> : <IconCheck />}
         </span>
-        <div className="tool-turn-meta">
-          <span className="tool-turn-title">{item.tool_name}</span>
-          <span className="tool-turn-subtitle">{item.agent_name ? `via ${item.agent_name}` : "tool call"}</span>
-        </div>
-        <span className="tool-turn-state">{running ? "Running" : "Done"}</span>
+        <span className="stb-title">
+          {isStreaming ? "Working…" : `Completed in ${completionEvent?.time_taken ?? "?"}s`}
+        </span>
+        <span className="stb-step-count">{toolCount}</span>
+        <span className="stb-caret" style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>›</span>
       </div>
-
-      <div className="tool-turn-grid">
-        <div className="tool-turn-block">
-          <span className="tool-turn-kicker">Request</span>
-          <pre className="tool-turn-text">{requestText || "No request payload"}</pre>
-        </div>
-
-        <div className="tool-turn-block tool-turn-response">
-          <span className="tool-turn-kicker">Response</span>
-          {item.response ? (
-            <pre className="tool-turn-text">{responseText || "No response payload"}</pre>
+      {!collapsed && (
+        <div className="stb-timeline">
+          {items.length ? (
+            items.map((item, i) => {
+              const isLast = i === items.length - 1;
+              const rowZ = items.length - i;
+              if (item.type === "thinking") {
+                return <TimelineThinkingRow key={item.id} item={item} isLast={isLast} isStreaming={isStreaming} zIndex={rowZ} />;
+              }
+              if (item.type === "agent_start") {
+                return <TimelineAgentStartRow key={item.id} item={item} isLast={isLast} zIndex={rowZ} />;
+              }
+              if (item.type === "tool_turn") {
+                return <TimelineToolCallRow key={item.id} item={item} isLast={isLast} isStreaming={isStreaming} zIndex={rowZ} />;
+              }
+              if (item.type === "error") {
+                return <TimelineErrorRow key={item.id} item={item} isLast={isLast} zIndex={rowZ} />;
+              }
+              return null;
+            })
           ) : (
-            <div className="tool-turn-loading">
+            <div className="trace-empty-state">
               <IconSpinner />
-              <span>Waiting for response</span>
+              <span>Waiting for activity…</span>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Individual timeline rows
+function TimelineAgentStartRow({ item, isLast, zIndex }) {
+  return (
+    <div className={`tl-row${isLast ? " tl-last" : ""}`} style={{ position: "relative", zIndex }}>
+      <div className="tl-connector">
+        <div className="tl-dot tl-dot-start"><IconAgentBot /></div>
+        {!isLast && <div className="tl-line" />}
+      </div>
+      <div className="tl-content">
+        <div className="tl-row-header">
+          <span className="tl-label tl-label-start">{item.agent_name}</span>
+          <span className="tl-time">{formatTraceTime(item.timestamp)}</span>
         </div>
       </div>
     </div>
   );
 }
 
-function TraceErrorRow({ item }) {
+function TimelineThinkingRow({ item, isLast, isStreaming, zIndex }) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = item.text ? (item.text.length > 60 ? item.text.slice(0, 60) + "…" : item.text) : "";
+
   return (
-    <div className="trace-error-row">
-      <span className="trace-error-icon">
-        <IconErrorSmall />
-      </span>
-      <span className="trace-error-text">{item.message}</span>
+    <div className={`tl-row${isLast ? " tl-last" : ""}`} style={{ position: "relative", zIndex }}>
+      <div className="tl-connector">
+        <div className="tl-dot tl-dot-thinking"><IconBrain /></div>
+        {!isLast && <div className="tl-line" />}
+      </div>
+      <div className="tl-content">
+        <div className="tl-row-header" onClick={() => item.text && setExpanded((v) => !v)} style={{ cursor: item.text ? "pointer" : "default" }}>
+          <span className="tl-label tl-label-thinking">Thinking</span>
+          <span className="tl-preview">{preview}</span>
+          {isLast && isStreaming && <span className="tl-live-pulse" />}
+          <span className="tl-time">{formatTraceTime(item.timestamp)}</span>
+          {item.text && <span className="tl-caret" style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>}
+        </div>
+        {expanded && item.text && (
+          <pre className="tl-detail">{item.text}</pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TimelineToolCallRow({ item, isLast, isStreaming, zIndex }) {
+  const [expanded, setExpanded] = useState(false);
+  const running = !item.response && isStreaming;
+  const requestText = traceRequestText(item.request);
+
+  return (
+    <div className={`tl-row${isLast ? " tl-last" : ""}${running ? " tl-running" : ""}`} style={{ position: "relative", zIndex }}>
+      <div className="tl-connector">
+        <div className={`tl-dot tl-dot-tool${running ? " tl-dot-running" : ""}`}>
+          {running ? <IconSpinner /> : <IconTool />}
+        </div>
+        {!isLast && <div className="tl-line" />}
+      </div>
+      <div className="tl-content">
+        <div className="tl-row-header" onClick={() => setExpanded((v) => !v)} style={{ cursor: "pointer" }}>
+          <span className="tl-label tl-label-tool">{item.tool_name}</span>
+          {item.agent_name && <span className="tl-badge">by {item.agent_name}</span>}
+          {item.response && <span className="tl-check"><IconCheck /></span>}
+          {running && <span className="tl-live-pulse" />}
+          <span className="tl-time">{formatTraceTime(item.timestamp)}</span>
+          <span className="tl-caret" style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>
+        </div>
+        {expanded && (
+          <div className="tl-tool-detail">
+            <div className="tl-tool-section">
+              <span className="tl-tool-kicker">Request</span>
+              <pre className="tl-tool-code">{requestText || "—"}</pre>
+            </div>
+            {item.response ? (
+              <div className="tl-tool-section">
+                <span className="tl-tool-kicker">Response</span>
+                <pre className="tl-tool-code">{traceResponseText(item.response) || "—"}</pre>
+              </div>
+            ) : (
+              <div className="tl-tool-section">
+                <span className="tl-tool-kicker">Response</span>
+                <div className="tl-tool-waiting"><IconSpinner /> <span>Waiting…</span></div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
+function TimelineErrorRow({ item, isLast, zIndex }) {
+  return (
+    <div className={`tl-row${isLast ? " tl-last" : ""}`} style={{ position: "relative", zIndex }}>
+      <div className="tl-connector">
+        <div className="tl-dot tl-dot-error"><IconErrorSmall /></div>
+        {!isLast && <div className="tl-line" />}
+      </div>
+      <div className="tl-content">
+        <div className="tl-row-header">
+          <span className="tl-label tl-label-error">Error</span>
+          <span className="tl-error-msg">{item.message}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -529,12 +579,18 @@ function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
   const [selectedModel, setSelectedModel] = useState("");
   const [newModelName, setNewModelName] = useState("");
   const [newModelType, setNewModelType] = useState("google");
+  
+  const [newProviderName, setNewProviderName] = useState("");
   const [localError, setLocalError] = useState("");
 
   useEffect(() => {
     if (!show) return;
     const config = initialConfig || {};
     const keys = config.provider_keys || {};
+    
+    // Merge existing keys with defaults
+    const mergedKeys = { google: "", openai: "", anthropic: "", ...keys };
+    
     const nextModels = Array.isArray(config.all_models) && config.all_models.length
       ? config.all_models
       : [{ model_name: "gemini-2.5-flash", model_type: "google" }];
@@ -542,15 +598,12 @@ function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
       ? config.selected_model
       : nextModels[0].model_name;
 
-    setProviderKeys({
-      google: keys.google || "",
-      openai: keys.openai || "",
-      anthropic: keys.anthropic || "",
-    });
+    setProviderKeys(mergedKeys);
     setModels(nextModels);
     setSelectedModel(nextSelected);
     setNewModelName("");
-    setNewModelType("google");
+    setNewModelType(Object.keys(mergedKeys)[0] || "google");
+    setNewProviderName("");
     setLocalError("");
   }, [show, initialConfig]);
 
@@ -588,111 +641,159 @@ function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
     }
   }
 
+  function addProvider() {
+    const providerName = newProviderName.trim().toLowerCase();
+    if (!providerName) return;
+    if (Object.prototype.hasOwnProperty.call(providerKeys, providerName)) {
+      setLocalError("This provider is already added.");
+      return;
+    }
+    setProviderKeys(prev => ({ ...prev, [providerName]: "" }));
+    setNewProviderName("");
+    setNewModelType(providerName);
+    setLocalError("");
+  }
+
+  function removeProvider(providerName) {
+    const keys = { ...providerKeys };
+    delete keys[providerName];
+    setProviderKeys(keys);
+    
+    // Also remove models associated with this provider
+    const updatedModels = models.filter(m => m.model_type !== providerName);
+    if (!updatedModels.length) {
+       setModels([]);
+       setSelectedModel("");
+    } else {
+       setModels(updatedModels);
+       if (!updatedModels.some(m => m.model_name === selectedModel)) {
+         setSelectedModel(updatedModels[0].model_name);
+       }
+    }
+  }
+
   async function saveSettings() {
     if (!models.length) {
       setLocalError("Add at least one model.");
       return;
     }
-    if (!selectedModel || !models.some((model) => model.model_name === selectedModel)) {
-      setLocalError("Select a valid chat model.");
-      return;
+
+    let finalSelected = selectedModel;
+    if (!finalSelected || !models.some((model) => model.model_name === finalSelected)) {
+      finalSelected = models[0].model_name;
     }
 
     setLocalError("");
     await onSave({
       provider_keys: providerKeys,
       all_models: models,
-      selected_model: selectedModel,
+      selected_model: finalSelected,
     });
   }
 
+  const providerList = Object.keys(providerKeys);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card model-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card model-modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(960px, calc(100vw - 32px))' }}>
         <div className="modal-head">
-          <h3>Agent Panel</h3>
+          <h3>Agent Panel Configuration</h3>
           <button className="modal-close" onClick={onClose}>X</button>
         </div>
 
-        <div className="config-grid">
-          <label>Google API Key
-            <input
-              type="password"
-              value={providerKeys.google}
-              onChange={(e) => setProviderKeys((prev) => ({ ...prev, google: e.target.value }))}
-              placeholder="Paste key or keep masked value"
-              autoComplete="off"
-            />
-          </label>
-          <label>OpenAI API Key
-            <input
-              type="password"
-              value={providerKeys.openai}
-              onChange={(e) => setProviderKeys((prev) => ({ ...prev, openai: e.target.value }))}
-              placeholder="Paste key or keep masked value"
-              autoComplete="off"
-            />
-          </label>
-          <label>Anthropic API Key
-            <input
-              type="password"
-              value={providerKeys.anthropic}
-              onChange={(e) => setProviderKeys((prev) => ({ ...prev, anthropic: e.target.value }))}
-              placeholder="Paste key or keep masked value"
-              autoComplete="off"
-            />
-          </label>
-        </div>
+        <div className="agent-panels-container">
+          <div className="agent-panel">
+            <div className="section-head"><IconSettings /><span>Providers</span></div>
+            <div className="provider-list">
+              {providerList.map((provider) => (
+                <div key={provider} className="provider-row">
+                  <div className="provider-header">
+                    <span style={{textTransform: 'capitalize', fontSize: '0.86rem', color: 'var(--text-0)'}}>{provider}</span>
+                    {!["google", "openai", "anthropic"].includes(provider) && (
+                      <button className="session-del" onClick={() => removeProvider(provider)} title="Remove provider" style={{ opacity: 1 }}><IconTrash /></button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <input
+                      type="password"
+                      value={providerKeys[provider]}
+                      onChange={(e) => setProviderKeys((prev) => ({ ...prev, [provider]: e.target.value }))}
+                      placeholder={`${provider} API Key`}
+                      autoComplete="off"
+                      style={{ flex: 1, marginTop: 0 }}
+                    />
+                    <button 
+                      className="btn-ghost" 
+                      onClick={() => saveSettings()} 
+                      disabled={saving}
+                      title={`Save ${provider} settings`}
+                      style={{ padding: '0 12px', height: 'auto' }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="add-provider-row" style={{ marginTop: 'auto', paddingTop: '12px' }}>
+               <input
+                 type="text"
+                 placeholder="New provider name"
+                 value={newProviderName}
+                 onChange={(e) => setNewProviderName(e.target.value)}
+               />
+               <button className="btn-ghost" onClick={addProvider} style={{ whiteSpace: 'nowrap' }}>
+                 <IconPlus /> Add Provider
+               </button>
+            </div>
+          </div>
 
-        <div className="section-head"><IconTable /><span>Available Models</span></div>
-        <div className="model-list">
-          {models.map((model) => (
-            <div key={`${model.model_name}-${model.model_type}`} className="model-row">
-              <label className="model-choice">
-                <input
-                  type="radio"
-                  name="selected-model"
-                  checked={selectedModel === model.model_name}
-                  onChange={() => setSelectedModel(model.model_name)}
-                />
-                <span>{model.model_name}</span>
-                <small>{model.model_type}</small>
-              </label>
-              <button
-                className="session-del"
-                onClick={() => removeModel(model.model_name, model.model_type)}
-                title="Remove model"
+          <div className="agent-panel">
+            <div className="section-head"><IconTable /><span>Models</span></div>
+            <div className="model-list">
+              {models.map((model) => (
+                <div key={`${model.model_name}-${model.model_type}`} className="model-row">
+                  <div className="model-choice">
+                    <span>{model.model_name}</span>
+                    <small>{model.model_type}</small>
+                  </div>
+                  <button
+                    className="session-del"
+                    onClick={() => removeModel(model.model_name, model.model_type)}
+                    title="Remove model"
+                  >
+                    <IconTrash />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="add-model-row" style={{ marginTop: 'auto', paddingTop: '12px' }}>
+              <input
+                type="text"
+                placeholder="Model name"
+                value={newModelName}
+                onChange={(e) => setNewModelName(e.target.value)}
+              />
+              <select
+                value={newModelType}
+                onChange={(e) => setNewModelType(e.target.value)}
+                className="model-select"
               >
-                <IconTrash />
+                {providerList.map(p => (
+                  <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+                ))}
+              </select>
+              <button className="btn-ghost" onClick={addModel}>
+                <IconPlus /> Add
               </button>
             </div>
-          ))}
-        </div>
-
-        <div className="add-model-row">
-          <input
-            type="text"
-            placeholder="Model name (for example: gpt-4o-mini)"
-            value={newModelName}
-            onChange={(e) => setNewModelName(e.target.value)}
-          />
-          <select
-            value={newModelType}
-            onChange={(e) => setNewModelType(e.target.value)}
-            className="model-select"
-          >
-            <option value="google">Google</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-          </select>
-          <button className="btn-ghost" onClick={addModel}>
-            <IconPlus /> Add
-          </button>
+          </div>
         </div>
 
         {localError && <div className="banner is-error">{localError}</div>}
 
-        <div className="modal-actions">
+        <div className="modal-actions" style={{ paddingTop: '8px' }}>
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-primary" onClick={saveSettings} disabled={saving}>
             {saving ? <><IconSpinner /> Saving...</> : "Save Settings"}

@@ -1,9 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 
 
-SUPPORTED_PROVIDERS = {"google", "openai", "anthropic"}
-
-
 class ModelEntry(BaseModel):
     model_name: str
     model_type: str
@@ -22,8 +19,8 @@ class ModelEntry(BaseModel):
     @classmethod
     def validate_type(cls, value: str) -> str:
         provider = value.strip().lower()
-        if provider not in SUPPORTED_PROVIDERS:
-            raise ValueError("model_type must be one of: google, openai, anthropic")
+        if not provider:
+            raise ValueError("model_type string is required")
         return provider
 
 
@@ -38,10 +35,8 @@ class ChatModelConfigUpdate(BaseModel):
         normalized: dict[str, str] = {}
         for key, api_key in value.items():
             provider = key.strip().lower()
-            if provider not in SUPPORTED_PROVIDERS:
-                raise ValueError(
-                    f"Unsupported provider '{provider}'. Allowed: google, openai, anthropic"
-                )
+            if not provider:
+                continue
             normalized[provider] = (api_key or "").strip()
         return normalized
 

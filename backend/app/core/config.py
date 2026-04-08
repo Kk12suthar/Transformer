@@ -36,6 +36,7 @@ class Settings:
     pg_user: str = os.getenv("POSTGRES_USER", "postgres")
     pg_password: str = os.getenv("POSTGRES_PASSWORD", "imsuperuser")
     pg_dbname: str = os.getenv("POSTGRES_DBNAME", "mvp")
+    pg_sslmode: str = os.getenv("POSTGRES_SSLMODE", "prefer")
 
     app_schema: str = os.getenv("APP_SCHEMA", "mvp")
     uploads_schema: str = os.getenv("UPLOADS_SCHEMA", "uploads")
@@ -49,7 +50,7 @@ class Settings:
     def db_url(self) -> str:
         return (
             f"postgresql+psycopg2://{self.pg_user}:{self.pg_password}"
-            f"@{self.pg_host}:{self.pg_port}/{self.pg_dbname}"
+            f"@{self.pg_host}:{self.pg_port}/{self.pg_dbname}?sslmode={self.pg_sslmode}"
         )
 
     @property
@@ -62,15 +63,12 @@ class Settings:
     def adk_db_url(self) -> str:
         """
         Legacy DB URL for ADK's DatabaseSessionService.
-        Kept for an optional database-backed session mode, but the backend now
-        uses ADK's in-memory session service by default.
         """
         base = (
             f"postgresql+psycopg://{self.pg_user}:{self.pg_password}"
             f"@{self.pg_host}:{self.pg_port}/{self.pg_dbname}"
         )
-        # search_path forces ADK to create/query its tables inside adk_schema
-        return f"{base}?options=-c search_path%3D{self.adk_schema}"
+        return f"{base}?sslmode={self.pg_sslmode}&options=-c search_path%3D{self.adk_schema}"
 
     # Name used by ADK Runner + session service — change here to rename the app
     adk_app_name: str = os.getenv("ADK_APP_NAME", "mvp_transformation_stream")

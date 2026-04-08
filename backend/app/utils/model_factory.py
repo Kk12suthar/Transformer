@@ -75,47 +75,38 @@ def _create_google_model(model_name: str, api_key: str):
     )
 
 
-def _create_openai_model(model_name: str, api_key: str):
-    from google.adk.models.lite_llm import LiteLlm
-
-    if not api_key:
-        raise ValueError(
-            f"No API key configured for OpenAI model '{model_name}'. "
-            "Set it from Agent Panel."
-        )
-    litellm_name = model_name if model_name.startswith("openai/") else f"openai/{model_name}"
-    return LiteLlm(model=litellm_name, api_key=api_key)
-
-
-def _create_anthropic_model(model_name: str, api_key: str):
-    from google.adk.models.lite_llm import LiteLlm
-
-    if not api_key:
-        raise ValueError(
-            f"No API key configured for Anthropic model '{model_name}'. "
-            "Set it from Agent Panel."
-        )
-    litellm_name = (
-        model_name if model_name.startswith("anthropic/") else f"anthropic/{model_name}"
-    )
-    return LiteLlm(model=litellm_name, api_key=api_key)
-
-
 def create_model(model_name: str, model_type: str, api_key: str):
-    provider = _normalize_provider(model_type, model_name)
+    provider = (model_type or "").strip().lower()
+
     if provider == "google":
         return _create_google_model(model_name, api_key)
-    if provider == "openai":
-        return _create_openai_model(model_name, api_key)
-    if provider == "anthropic":
-        return _create_anthropic_model(model_name, api_key)
-    raise ValueError(f"Unsupported model provider: {provider}")
+
+    from google.adk.models.lite_llm import LiteLlm
+
+    if not api_key:
+        raise ValueError(f"No API key configured for {provider} model '{model_name}'. Set it from Agent Panel.")
+
+    # Always use the exact name given, or prefix if needed by litellm, typically litellm handles "provider/model_name"
+    if provider and not model_name.startswith(f"{provider}/") and provider not in ("openai", "anthropic"):
+        litellm_name = f"{provider}/{model_name}"
+    elif provider == "openai" and not model_name.startswith("openai/"):
+         litellm_name = f"openai/{model_name}"
+    elif provider == "anthropic" and not model_name.startswith("anthropic/"):
+         litellm_name = f"anthropic/{model_name}"
+    else:
+        litellm_name = model_name
+
+    return LiteLlm(model=litellm_name, api_key=api_key)
 
 
 def create_model_from_config(app_config: dict[str, Any], section: str, key: str):
     model_name = _pick_model_name(app_config, section, key)
     model_cfg = _find_model_config(app_config, model_name)
-    provider = _normalize_provider(str(model_cfg.get("model_type", "")), model_name)
+    provider = str(model_cfg.get("model_type", "")).strip().lower()
+
+    # if there is no config in DB for this, try inferring provider so it works without UI setup
+    if not provider:
+         provider = _normalize_provider(provider, model_name)
 
     configured_key = str(model_cfg.get("model_api_key", "") or "").strip()
     api_key = configured_key or _env_key_for_provider(provider)
