@@ -1,0 +1,29 @@
+[
+  {
+    "type": "function_request",
+    "tool_name": "postgres_db_toolset",
+    "tool_args": {
+      "sql": "SELECT * FROM uploads.customers"
+    },
+    "agent_name": "Orchestrator"
+  },
+  {
+    "type": "function_response",
+    "tool_name": "postgres_db_toolset",
+    "response": {
+      "status": "ok",
+      "row_count": 42
+    },
+    "agent_name": "DataOperations"
+  },
+  {
+    "type": "agent_thinking",
+    "text": "Planning a trim + dedupe cleanup",
+    "agent_name": "Analysis"
+  },
+  {
+    "type": "final_response",
+    "text": "Created cleaned_customers and removed duplicates.",
+    "agent_name": "Orchestrator"
+  }
+]

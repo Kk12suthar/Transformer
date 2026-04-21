@@ -30,10 +30,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run syntax checks
-        run: |
-          python -m compileall app
-          python -m py_compile run.py
+      - name: Run backend verification suite
+        env:
+          JWT_SECRET_KEY: ci-secret-key
+          API_KEY_ENCRYPTION_KEY: ci-secret-key
+        run: python scripts/run_backend_checks.py
 
       - name: Run a lightweight config smoke test
         env:

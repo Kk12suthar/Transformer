@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -49,7 +49,7 @@ def _resource_id(session_id: str, folder_id: str | None) -> str:
 
 
 def _as_timestamp() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _json_safe(value: Any) -> Any:

@@ -41,11 +41,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Validate backend package
+      - name: Run backend verification suite
         working-directory: backend
+        env:
+          JWT_SECRET_KEY: ci-secret-key
+          API_KEY_ENCRYPTION_KEY: ci-secret-key
         run: |
-          python -m compileall app
-          python -m py_compile run.py
+          python scripts/run_backend_checks.py
 
       # This is continuous delivery, not full deployment yet.
       # The workflow produces artifacts that are ready to deploy later
