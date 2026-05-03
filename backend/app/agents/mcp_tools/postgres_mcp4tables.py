@@ -175,6 +175,8 @@ def _extract_table_candidates(query: str) -> set[str]:
     out: set[str] = set()
     for p in patterns:
         for m in re.finditer(p, q):
+            if "information_schema." in m.group(0):
+                continue
             out.add(m.group(1))
     return out
 
@@ -222,8 +224,7 @@ async def list_tools() -> list[Tool]:
         desc = (
             f"Execute SQL on the PostgreSQL database.\n\n"
             f"IMPORTANT: You MUST use ONLY the following tables for this session "
-            f"(session_id={session_id}). Do NOT query information_schema or any "
-            f"other tables — they will be rejected.\n\n"
+            f"(session_id={session_id}). Do not access tables outside this list.\n\n"
             f"Available tables:\n{tables_block}\n\n"
             f"Use table names DIRECTLY without any schema prefix (e.g. SELECT * FROM table_name).\n"
             f"To see column info, query 'information_schema.columns' but you MUST include "

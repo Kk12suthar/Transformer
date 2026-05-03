@@ -4,6 +4,13 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8100
 const TOKEN_KEY = "mvp_token";
 const USER_KEY = "mvp_user";
 const PAGE_SIZE = 50;
+const TABLE_TEMPLATES = [
+  { id: "contacts", label: "Contacts", prompt: "Profile the selected customer or contact table, find missing fields, duplicate records, likely identifiers, and suggest a safe cleaning plan." },
+  { id: "sales", label: "Sales", prompt: "Analyze the selected sales/order table for missing values, duplicate rows, date-like columns, numeric measures, and useful segment columns." },
+  { id: "support", label: "Support", prompt: "Inspect the selected support/ticket table for status consistency, stale records, missing ownership, duplicate tickets, and date/time quality." },
+  { id: "finance", label: "Finance", prompt: "Review the selected transaction table for duplicate rows, missing amounts or dates, suspicious numeric ranges, and category consistency." },
+  { id: "inventory", label: "Inventory", prompt: "Analyze the selected inventory/product table for duplicate SKUs, missing product fields, inconsistent categories, and numeric outliers." },
+];
 
 function parseStoredUser() {
   const raw = localStorage.getItem(USER_KEY);
@@ -78,6 +85,13 @@ async function downloadTable({ token, sessionId, tableName }) {
   link.href = url; link.download = `${tableName}.csv`;
   document.body.appendChild(link); link.click(); link.remove();
   window.URL.revokeObjectURL(url);
+}
+
+async function cleanTableCopy({ token, sessionId, tableName }) {
+  return apiRequest(
+    `/api/v1/tables/${encodeURIComponent(tableName)}/clean?session_id=${encodeURIComponent(sessionId)}`,
+    { method: "POST", token },
+  );
 }
 
 function eventSummary(event) {
@@ -573,6 +587,100 @@ function UploadModal({ show, onClose, selectedSessionId, token, onUploaded }) {
 }
 
 // â”€â”€ Main App â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function QualityPanel({
+  profile,
+  loading,
+  cleaningReport,
+  cleaningBusy,
+  onRefresh,
+  onClean,
+  onTemplate,
+  selectedTableName,
+}) {
+  if (!selectedTableName) {
+    return <div className="quality-empty"><span>Select a table to see quality signals.</span></div>;
+  }
+  if (loading && !profile) {
+    return <div className="quality-empty"><IconSpinner /><span>Profiling table...</span></div>;
+  }
+  if (!profile) {
+    return (
+      <div className="quality-empty">
+        <span>No profile loaded.</span>
+        <button className="tc-btn" onClick={onRefresh}>Refresh</button>
+      </div>
+    );
+  }
+
+  const issueCount = (profile.top_issues || []).filter((item) => item.missing > 0).length;
+  const plan = (profile.cleaning_plan || []).slice(0, 3);
+  const insights = (profile.insights || []).slice(0, 4);
+
+  return (
+    <div className="quality-panel">
+      <div className="quality-top">
+        <div className="score-badge">
+          <span>{profile.score}</span>
+          <small>score</small>
+        </div>
+        <div className="quality-stats">
+          <span>{Number(profile.total_rows || 0).toLocaleString()} rows</span>
+          <span>{Number(profile.column_count || 0).toLocaleString()} columns</span>
+          <span>{issueCount} issue groups</span>
+          <span>{profile.retention_hours || 24}h retention</span>
+        </div>
+        <div className="quality-actions">
+          <button className="tc-btn" onClick={onRefresh} disabled={loading}>
+            {loading ? <IconSpinner /> : <IconBrain />} Refresh
+          </button>
+          <button className="tc-btn quality-clean-btn" onClick={onClean} disabled={cleaningBusy}>
+            {cleaningBusy ? <IconSpinner /> : <IconCheck />} Clean Copy
+          </button>
+        </div>
+      </div>
+
+      <div className="insight-grid">
+        {insights.map((item) => (
+          <div key={`${item.label}-${item.value}`} className="insight-card">
+            <strong>{item.label}</strong>
+            <span>{item.value}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="plan-list">
+        {plan.map((item) => (
+          <div key={`${item.action}-${item.risk}`} className="plan-item">
+            <span>{item.action}</span>
+            <small>{item.risk}</small>
+          </div>
+        ))}
+      </div>
+
+      <div className="template-row">
+        {TABLE_TEMPLATES.map((template) => (
+          <button key={template.id} className="template-chip" onClick={() => onTemplate(template)}>
+            {template.label}
+          </button>
+        ))}
+      </div>
+
+      {cleaningReport && (
+        <div className="impact-report">
+          <div>
+            <strong>{cleaningReport.table_name}</strong>
+            <span>{`${cleaningReport.rows_before} -> ${cleaningReport.rows_after} rows`}</span>
+          </div>
+          <div>
+            <strong>{`${cleaningReport.before?.score} -> ${cleaningReport.after?.score}`}</strong>
+            <span>quality score</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
   const [providerKeys, setProviderKeys] = useState({ google: "", openai: "", anthropic: "" });
   const [models, setModels] = useState([]);
@@ -593,7 +701,7 @@ function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
     
     const nextModels = Array.isArray(config.all_models) && config.all_models.length
       ? config.all_models
-      : [{ model_name: "gemini-2.5-flash", model_type: "google" }];
+      : [{ model_name: "gemini-3.1-pro-preview", model_type: "google" }];
     const nextSelected = config.selected_model && nextModels.some((m) => m.model_name === config.selected_model)
       ? config.selected_model
       : nextModels[0].model_name;
@@ -692,6 +800,10 @@ function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
   }
 
   const providerList = Object.keys(providerKeys);
+  const freeUsed = Number(initialConfig?.free_messages_used ?? 0);
+  const freeLimit = Number(initialConfig?.free_messages_limit ?? 5);
+  const freeRemaining = Number(initialConfig?.free_messages_remaining ?? Math.max(freeLimit - freeUsed, 0));
+  const quotaExhausted = Boolean(initialConfig?.requires_api_key);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -699,6 +811,18 @@ function ModelConfigModal({ show, onClose, initialConfig, onSave, saving }) {
         <div className="modal-head">
           <h3>Agent Panel Configuration</h3>
           <button className="modal-close" onClick={onClose}>X</button>
+        </div>
+
+        <div className={`quota-banner${quotaExhausted ? " is-exhausted" : ""}`}>
+          <div>
+            <strong>{quotaExhausted ? "Bring your own API key to continue" : "Bring your own API key for regular use"}</strong>
+            <span>
+              {quotaExhausted
+                ? "The free server-key allowance is used up for this account."
+                : `Free server-key messages remaining: ${freeRemaining} of ${freeLimit}.`}
+            </span>
+          </div>
+          <small>{freeUsed}/{freeLimit} used</small>
         </div>
 
         <div className="agent-panels-container">
@@ -825,22 +949,22 @@ function LandingPage({ onGetStarted }) {
       <main className="landing-main">
         <section className="hero-section">
           <h1 className="hero-title">Welcome to <span className="text-gradient">Transformer</span></h1>
-          <p className="hero-sub">The ultimate Agentic table cleaning & transformation workspace.</p>
+          <p className="hero-sub">A practical workspace for profiling, cleaning, and transforming messy tables.</p>
           <button className="btn-primary main-cta" onClick={onGetStarted}>Get Started for Free</button>
         </section>
 
         <section className="grid-section">
           <div className="glass-card">
             <h3>⚙️ How It Works</h3>
-            <p>Upload your messy CSVs and Excels. Our autonomous AI pipelines instantly parse, clean, and transform columns exactly how you instruct them via plain English.</p>
+            <p>Upload CSV or Excel files, profile quality issues, and turn raw tables into clean working datasets.</p>
           </div>
           <div className="glass-card">
             <h3>🚀 The Impact</h3>
-            <p>Turn hours of manual spreadsheet formatting into seconds of automated processing. Focus on the insights, let Transformer handle the data janitorial work securely.</p>
+            <p>Track what changed with before/after scores, row counts, duplicate removal, and clean copy outputs.</p>
           </div>
           <div className="glass-card">
             <h3>💻 Tech Stack</h3>
-            <p>Built for scale with <strong>React + Vite</strong> on the frontend, powered by <strong>Python FastAPI</strong> and <strong>SQLAlchemy</strong> on the backend. Data resides safely in <strong>PostgreSQL</strong> via an MCP Agent interface.</p>
+            <p>Tables are kept short-lived by design, with 24-hour cleanup support for lightweight testing.</p>
           </div>
         </section>
       </main>
@@ -865,15 +989,23 @@ export default function App() {
   const [previewPage, setPreviewPage] = useState(1);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [hasMorePreview, setHasMorePreview] = useState(false);
+  const [qualityProfile, setQualityProfile] = useState(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
+  const [cleaningReport, setCleaningReport] = useState(null);
+  const [cleaningBusy, setCleaningBusy] = useState(false);
 
   const [showUpload, setShowUpload] = useState(false);
   const [showModelConfig, setShowModelConfig] = useState(false);
   const [modelConfig, setModelConfig] = useState({
     provider_keys: { google: "", openai: "", anthropic: "" },
-    all_models: [{ model_name: "gemini-2.5-flash", model_type: "google" }],
-    selected_model: "gemini-2.5-flash",
+    all_models: [{ model_name: "gemini-3.1-pro-preview", model_type: "google" }],
+    selected_model: "gemini-3.1-pro-preview",
+    free_messages_used: 0,
+    free_messages_limit: 5,
+    free_messages_remaining: 5,
+    requires_api_key: false,
   });
-  const [chatModel, setChatModel] = useState("gemini-2.5-flash");
+  const [chatModel, setChatModel] = useState("gemini-3.1-pro-preview");
   const [modelConfigSaving, setModelConfigSaving] = useState(false);
   const [query, setQuery] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -887,7 +1019,22 @@ export default function App() {
   const chatScrollRef = useRef(null);
   const traceScrollRef = useRef(null);
   const wasCompactRef = useRef(false);
-  const canRun = Boolean(selectedSessionId && query.trim() && !isStreaming && chatModel);
+  const freeUsed = Number(modelConfig?.free_messages_used ?? 0);
+  const freeLimit = Number(modelConfig?.free_messages_limit ?? 5);
+  const freeRemaining = Number(modelConfig?.free_messages_remaining ?? Math.max(freeLimit - freeUsed, 0));
+  const selectedModelProvider =
+    (modelConfig?.all_models || []).find((model) => model.model_name === chatModel)?.model_type ||
+    modelConfig?.all_models?.[0]?.model_type ||
+    "google";
+  const selectedProviderKey = String(modelConfig?.provider_keys?.[selectedModelProvider] || "").trim();
+  const hasSelectedProviderKey = Boolean(selectedProviderKey);
+  const needsApiKey = !hasSelectedProviderKey && (freeRemaining <= 0 || Boolean(modelConfig?.requires_api_key));
+  const quotaLabel = hasSelectedProviderKey
+    ? "API key active"
+    : needsApiKey
+      ? "Add API key"
+      : `${freeRemaining} free msgs left`;
+  const canRun = Boolean(selectedSessionId && query.trim() && !isStreaming && chatModel && !needsApiKey);
   const [uploadPendingSession, setUploadPendingSession] = useState(false);
   const [isCompactLayout, setIsCompactLayout] = useState(
     () => window.matchMedia("(max-width: 860px)").matches,
@@ -997,7 +1144,25 @@ export default function App() {
         loadPreview(data[0].table_name, sessionId, 1);
       }
       if (!data.length) { setSelectedTableName(""); setPreviewData(null); }
+      if (!data.length) { setQualityProfile(null); setCleaningReport(null); }
     } catch (err) { setError(toUiError(err)); }
+  }
+
+  async function loadQuality(tableName = selectedTableName, sessionId = selectedSessionId) {
+    if (!tableName || !sessionId) return;
+    setQualityLoading(true);
+    try {
+      const data = await apiRequest(
+        `/api/v1/tables/${encodeURIComponent(tableName)}/quality?session_id=${encodeURIComponent(sessionId)}`,
+        { token },
+      );
+      setQualityProfile(data);
+    } catch (err) {
+      setError(toUiError(err));
+      setQualityProfile(null);
+    } finally {
+      setQualityLoading(false);
+    }
   }
 
   async function loadPreview(tableName, sessionId = selectedSessionId, page = 1) {
@@ -1019,6 +1184,10 @@ export default function App() {
       setSelectedTableName(tableName);
       setPreviewPage(page);
       setHasMorePreview(loadedRows < totalRows);
+      if (page === 1) {
+        setCleaningReport(null);
+        loadQuality(tableName, sessionId);
+      }
     } catch (err) { setError(toUiError(err)); }
     finally { setPreviewLoading(false); }
   }
@@ -1031,7 +1200,7 @@ export default function App() {
       if (selectedSessionId === id) {
         const remaining = sessions.filter((s) => s.id !== id);
         setSelectedSessionId(remaining[0]?.id || "");
-        setTables([]); setPreviewData(null); setEvents([]); setChatMessages([]);
+        setTables([]); setPreviewData(null); setQualityProfile(null); setCleaningReport(null); setEvents([]); setChatMessages([]);
       }
     } catch (err) { setError(toUiError(err)); }
   }
@@ -1058,7 +1227,7 @@ export default function App() {
       const session = await apiRequest("/api/v1/chat/sessions", { method: "POST", token, body: {} });
       setSessions((prev) => [session, ...prev]);
       setSelectedSessionId(session.id);
-      setTables([]); setPreviewData(null); setChatMessages([]); setEvents([]);
+      setTables([]); setPreviewData(null); setQualityProfile(null); setCleaningReport(null); setChatMessages([]); setEvents([]);
     } catch (err) { setError(toUiError(err)); }
   }
 
@@ -1079,7 +1248,33 @@ export default function App() {
     setStatus("Table uploaded successfully.");
   }
 
+  async function handleCleanCopy() {
+    if (!selectedTableName || !selectedSessionId || cleaningBusy) return;
+    setCleaningBusy(true);
+    setError("");
+    try {
+      const report = await cleanTableCopy({ token, sessionId: selectedSessionId, tableName: selectedTableName });
+      setCleaningReport(report);
+      setStatus(report.summary || "Clean copy created.");
+      await refreshTables(selectedSessionId);
+      await loadPreview(report.table_name, selectedSessionId, 1);
+    } catch (err) {
+      setError(toUiError(err));
+    } finally {
+      setCleaningBusy(false);
+    }
+  }
+
+  function applyTemplate(template) {
+    setQuery(template.prompt);
+  }
+
   async function handleRunTransform() {
+    if (needsApiKey) {
+      setError("Free message limit reached. Add your own API key in Agent Panel to continue.");
+      setShowModelConfig(true);
+      return;
+    }
     if (!canRun) return;
     setError(""); setStatus(""); setLatestOutputTable("");
     setEvents([]);
@@ -1150,6 +1345,7 @@ export default function App() {
     finally {
       setIsStreaming(false);
       setEvents([]);
+      await refreshModelConfig();
       try { await apiRequest("/adk-api/transform/deactivate", { method: "POST", token, body: { session_id: selectedSessionId } }); } catch { /* best-effort */ }
     }
   }
@@ -1157,15 +1353,19 @@ export default function App() {
   function logout() {
     localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY);
     setToken(""); setUser(null); setSessions([]); setSelectedSessionId(""); setTables([]);
-    setSelectedTableName(""); setPreviewData(null); setEvents([]); setChatMessages([]);
+    setSelectedTableName(""); setPreviewData(null); setQualityProfile(null); setCleaningReport(null); setEvents([]); setChatMessages([]);
     setLatestOutputTable(""); setError(""); setStatus("");
     setShowModelConfig(false);
     setModelConfig({
       provider_keys: { google: "", openai: "", anthropic: "" },
-      all_models: [{ model_name: "gemini-2.5-flash", model_type: "google" }],
-      selected_model: "gemini-2.5-flash",
+      all_models: [{ model_name: "gemini-3.1-pro-preview", model_type: "google" }],
+      selected_model: "gemini-3.1-pro-preview",
+      free_messages_used: 0,
+      free_messages_limit: 5,
+      free_messages_remaining: 5,
+      requires_api_key: false,
     });
-    setChatModel("gemini-2.5-flash");
+    setChatModel("gemini-3.1-pro-preview");
     setModelConfigSaving(false);
   }
 
@@ -1189,7 +1389,7 @@ export default function App() {
             </svg>
             <h1>Transformer</h1>
           </div>
-          <p>Agentic table cleaning &amp; transformation workspace.</p>
+          <p>Table profiling, cleaning, and transformation workspace.</p>
           <div className="auth-tabs">
             <button type="button" className={authMode === "signin" ? "tab is-active" : "tab"} onClick={() => setAuthMode("signin")}>Sign In</button>
             <button type="button" className={authMode === "signup" ? "tab is-active" : "tab"} onClick={() => setAuthMode("signup")}>Sign Up</button>
@@ -1304,6 +1504,15 @@ export default function App() {
           <div className="topbar-actions">
             {error && <div className="banner is-error topbar-banner">{error}<button className="banner-close" onClick={() => setError("")}>âœ•</button></div>}
             {status && <div className="banner is-success topbar-banner">{status}</div>}
+            <button
+              className={`quota-chip${needsApiKey ? " is-exhausted" : ""}${hasSelectedProviderKey ? " is-owned" : ""}`}
+              onClick={() => setShowModelConfig(true)}
+              title={hasSelectedProviderKey ? "Using your configured provider key" : "Free message counter"}
+            >
+              <span className="quota-dot" />
+              <span>{quotaLabel}</span>
+              {!hasSelectedProviderKey && <small>{freeUsed}/{freeLimit}</small>}
+            </button>
             <button className="btn-upload" onClick={() => setShowModelConfig(true)} title="Agent panel">
               <IconSettings /> Agent Panel
             </button>
@@ -1342,6 +1551,20 @@ export default function App() {
                   </div>
                 )) : <div className="empty-state">No tables in this session yet.</div>}
               </div>
+            </div>
+
+            <div className="data-section quality-section">
+              <div className="section-head"><IconBrain /><span>Table Quality</span></div>
+              <QualityPanel
+                profile={qualityProfile}
+                loading={qualityLoading}
+                cleaningReport={cleaningReport}
+                cleaningBusy={cleaningBusy}
+                selectedTableName={selectedTableName}
+                onRefresh={() => loadQuality(selectedTableName, selectedSessionId)}
+                onClean={handleCleanCopy}
+                onTemplate={applyTemplate}
+              />
             </div>
 
             {/* Preview */}
@@ -1448,6 +1671,11 @@ export default function App() {
                   ))}
                 </select>
               </div>
+              {needsApiKey && (
+                <div className="quota-inline">
+                  Free message limit reached. Add your own API key in Agent Panel.
+                </div>
+              )}
               <textarea
                 className="chat-input"
                 value={query}
@@ -1457,7 +1685,7 @@ export default function App() {
                 rows={2}
                 disabled={isStreaming}
               />
-              <button className="send-btn" onClick={handleRunTransform} disabled={!canRun} title="Run Agent">
+              <button className="send-btn" onClick={handleRunTransform} disabled={!canRun} title={needsApiKey ? "Add your API key to continue" : "Run Agent"}>
                 {isStreaming ? <IconSpinner /> : <IconSend />}
               </button>
             </div>

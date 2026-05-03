@@ -24,7 +24,9 @@ from app.schemas.transform import ActivateRequest, TransformRequest
 from app.services.lock_manager import lock_manager
 from app.services.model_config_service import (
     build_runtime_agent_config,
+    consume_free_message_if_needed,
     get_chat_model_config,
+    get_free_message_quota,
 )
 
 
@@ -416,6 +418,22 @@ async def transform_stream(
     ).first():
         raise HTTPException(status_code=404, detail="Session not found")
 
+    chat_model_config = get_chat_model_config(db, user["id"])
+    quota = get_free_message_quota(
+        db=db,
+        user_id=user["id"],
+        config=chat_model_config,
+        requested_model=payload.chat_model,
+    )
+    if quota.requires_api_key:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Free message limit reached. Add your own API key in Agent Panel "
+                "to continue using the agent."
+            ),
+        )
+
     async def event_generator() -> AsyncGenerator[str, None]:
         started = time.time()
         final_text = ""
@@ -439,7 +457,20 @@ async def transform_stream(
             )
 
             app_name = settings.adk_app_name
-            chat_model_config = get_chat_model_config(db, user["id"])
+            consumed_quota = consume_free_message_if_needed(
+                db=db,
+                user_id=user["id"],
+                config=chat_model_config,
+                requested_model=payload.chat_model,
+            )
+            if consumed_quota.requires_api_key:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Free message limit reached. Add your own API key in Agent Panel "
+                        "to continue using the agent."
+                    ),
+                )
             runtime_agent_config = build_runtime_agent_config(
                 config=chat_model_config,
                 requested_model=payload.chat_model,

@@ -48,7 +48,7 @@ def _pick_model_name(app_config: dict[str, Any], section: str, key: str) -> str:
     if env_model:
         return env_model
 
-    return "gemini-2.5-flash"
+    return "gemini-3.1-pro-preview"
 
 
 def _find_model_config(app_config: dict[str, Any], model_name: str) -> dict[str, Any]:

@@ -53,3 +53,7 @@ class ChatModelConfigResponse(BaseModel):
     provider_keys: dict[str, str] = Field(default_factory=dict)
     all_models: list[ModelEntry] = Field(default_factory=list)
     selected_model: str | None = None
+    free_messages_used: int = 0
+    free_messages_limit: int = 5
+    free_messages_remaining: int = 5
+    requires_api_key: bool = False

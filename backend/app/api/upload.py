@@ -49,10 +49,21 @@ async def upload_file(
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Empty file")
+    if len(file_bytes) > settings.upload_max_bytes:
+        max_mb = settings.upload_max_bytes / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File is too large for prototype mode. Upload files up to {max_mb:.0f} MB.",
+        )
 
     df = _read_dataframe(file, file_bytes)
     if df.empty:
         raise HTTPException(status_code=400, detail="Uploaded file has no rows")
+    if len(df) > settings.upload_max_rows:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File has too many rows for prototype mode. Upload up to {settings.upload_max_rows:,} rows.",
+        )
 
     base_name = sanitize_identifier(Path(file.filename or "table").stem)
     table_name = sanitize_identifier(f"{base_name}_{uuid.uuid4().hex[:8]}")

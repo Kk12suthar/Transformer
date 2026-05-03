@@ -41,6 +41,10 @@ class Settings:
     app_schema: str = os.getenv("APP_SCHEMA", "mvp")
     uploads_schema: str = os.getenv("UPLOADS_SCHEMA", "uploads")
     adk_schema_raw: str | None = os.getenv("ADK_SCHEMA")
+    upload_max_bytes: int = int(os.getenv("UPLOAD_MAX_BYTES", str(25 * 1024 * 1024)))
+    upload_max_rows: int = int(os.getenv("UPLOAD_MAX_ROWS", "100000"))
+    data_retention_hours: int = int(os.getenv("DATA_RETENTION_HOURS", "24"))
+    free_agent_messages: int = int(os.getenv("FREE_AGENT_MESSAGES", "5"))
 
     @property
     def cors_origins(self) -> list[str]:

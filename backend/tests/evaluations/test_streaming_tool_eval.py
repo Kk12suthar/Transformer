@@ -79,7 +79,7 @@ def test_streaming_agent_tool_eval_normalizes_request_and_propagates_state(monke
         token = stream_queue_var.set(queue)
         try:
             tool_context = SimpleNamespace(
-                state={"folder_id": "folder-789", "selected_model": "gemini-2.5-flash"}
+                state={"folder_id": "folder-789", "selected_model": "gemini-3.1-pro-preview"}
             )
             result = await tool.run_async(
                 args={"request": {"query": "trim whitespace"}},
@@ -101,6 +101,6 @@ def test_streaming_agent_tool_eval_normalizes_request_and_propagates_state(monke
     assert result == "Inner agent finished"
     assert queued_event.author == "EvalAgent"
     assert session_calls[0]["state"]["folder_id"] == "folder-789"
-    assert session_calls[0]["state"]["selected_model"] == "gemini-2.5-flash"
+    assert session_calls[0]["state"]["selected_model"] == "gemini-3.1-pro-preview"
     assert runner_calls[0]["new_message"].parts[0].text == "trim whitespace"
     assert propagated_state["last_tool_result"] == "done"

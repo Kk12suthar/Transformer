@@ -15,7 +15,7 @@ TRANSFORM_AGENT_ROLES = (
     "analysis_agent",
     "operations_agent",
 )
-DEFAULT_MODELS = [{"model_name": "gemini-2.5-flash", "model_type": "google"}]
+DEFAULT_MODELS = [{"model_name": "gemini-3.1-pro-preview", "model_type": "google"}]
 DEFAULT_PROVIDERS = ("google", "openai", "anthropic")
 
 
@@ -24,6 +24,15 @@ class ChatModelConfig:
     provider_api_keys: dict[str, str]
     all_models: list[dict[str, str]]
     selected_model: str
+
+
+@dataclass
+class FreeMessageQuota:
+    used: int
+    limit: int
+    remaining: int
+    requires_api_key: bool
+    provider: str
 
 
 def _build_fernet() -> Fernet:
@@ -82,6 +91,23 @@ def _normalize_selected_model(selected_model: str | None, models: list[dict[str,
     if selected_model and selected_model in allowed:
         return selected_model
     return models[0]["model_name"]
+
+
+def _infer_provider(model_name: str) -> str:
+    lowered = model_name.lower()
+    if lowered.startswith("openai/") or lowered.startswith("gpt-"):
+        return "openai"
+    if lowered.startswith("anthropic/") or lowered.startswith("claude"):
+        return "anthropic"
+    return "google"
+
+
+def _provider_for_model(config: ChatModelConfig, requested_model: str | None = None) -> str:
+    selected = _normalize_selected_model(requested_model or config.selected_model, config.all_models)
+    for item in config.all_models:
+        if item["model_name"] == selected:
+            return item["model_type"]
+    return _infer_provider(selected)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -176,6 +202,86 @@ def get_chat_model_config_masked(db: Session, user_id: str) -> ChatModelConfig:
         provider_api_keys=masked_keys,
         all_models=raw_config.all_models,
         selected_model=raw_config.selected_model,
+    )
+
+
+def _get_free_messages_used(db: Session, user_id: str) -> int:
+    row = db.execute(
+        text(
+            f"""
+            SELECT free_messages_used
+            FROM {settings.app_schema}.user_agent_usage
+            WHERE user_id = :user_id
+            """
+        ),
+        {"user_id": user_id},
+    ).first()
+    return int(row[0]) if row else 0
+
+
+def get_free_message_quota(
+    *,
+    db: Session,
+    user_id: str,
+    config: ChatModelConfig | None = None,
+    requested_model: str | None = None,
+) -> FreeMessageQuota:
+    raw_config = config or get_chat_model_config(db, user_id)
+    provider = _provider_for_model(raw_config, requested_model)
+    has_user_key = bool(decrypt_api_key(raw_config.provider_api_keys.get(provider, "")).strip())
+    used = _get_free_messages_used(db, user_id)
+    limit = settings.free_agent_messages
+    remaining = max(limit - used, 0)
+    return FreeMessageQuota(
+        used=used,
+        limit=limit,
+        remaining=remaining,
+        requires_api_key=(not has_user_key and remaining <= 0),
+        provider=provider,
+    )
+
+
+def consume_free_message_if_needed(
+    *,
+    db: Session,
+    user_id: str,
+    config: ChatModelConfig,
+    requested_model: str | None = None,
+) -> FreeMessageQuota:
+    quota = get_free_message_quota(
+        db=db,
+        user_id=user_id,
+        config=config,
+        requested_model=requested_model,
+    )
+    if quota.requires_api_key:
+        return quota
+
+    provider = _provider_for_model(config, requested_model)
+    has_user_key = bool(decrypt_api_key(config.provider_api_keys.get(provider, "")).strip())
+    if has_user_key:
+        return quota
+
+    db.execute(
+        text(
+            f"""
+            INSERT INTO {settings.app_schema}.user_agent_usage
+                (user_id, free_messages_used, created_at, updated_at)
+            VALUES
+                (:user_id, 1, NOW(), NOW())
+            ON CONFLICT (user_id) DO UPDATE SET
+                free_messages_used = {settings.app_schema}.user_agent_usage.free_messages_used + 1,
+                updated_at = NOW()
+            """
+        ),
+        {"user_id": user_id},
+    )
+    db.commit()
+    return get_free_message_quota(
+        db=db,
+        user_id=user_id,
+        config=config,
+        requested_model=requested_model,
     )
 
 

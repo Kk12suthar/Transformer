@@ -63,6 +63,13 @@ def init_schema() -> None:
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS {app_schema}.user_agent_usage (
+      user_id TEXT PRIMARY KEY REFERENCES {app_schema}.users(id) ON DELETE CASCADE,
+      free_messages_used INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     """
 
     with engine.begin() as conn:
