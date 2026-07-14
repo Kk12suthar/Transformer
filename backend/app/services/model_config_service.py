@@ -36,8 +36,10 @@ class FreeMessageQuota:
 
 
 def _build_fernet() -> Fernet:
-    key_material = settings.api_key_encryption_key.encode()[:32].ljust(32, b"\0")
-    encoded_key = base64.urlsafe_b64encode(key_material)
+    key_value = settings.api_key_encryption_key
+    if not key_value:
+        raise RuntimeError("API_KEY_ENCRYPTION_KEY must be set for backend API key storage")
+    encoded_key = base64.urlsafe_b64encode(key_value.encode())
     return Fernet(encoded_key)
 
 
@@ -54,9 +56,6 @@ def decrypt_api_key(encrypted_value: str | None) -> str:
     try:
         return _cipher.decrypt(encrypted_value.encode()).decode()
     except (InvalidToken, ValueError):
-        # Backward compatibility: allow plaintext values created before encryption.
-        if not encrypted_value.startswith("gAAAAA"):
-            return encrypted_value
         return ""
 
 
