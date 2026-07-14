@@ -26,10 +26,7 @@ class Settings:
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "change-me-for-production")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expires_minutes: int = int(os.getenv("JWT_EXPIRES_MINUTES", "480"))
-    api_key_encryption_key: str = os.getenv(
-        "API_KEY_ENCRYPTION_KEY",
-        os.getenv("JWT_SECRET_KEY", "change-me-for-production"),
-    )
+    api_key_encryption_key: str | None = os.getenv("API_KEY_ENCRYPTION_KEY")
 
     pg_host: str = os.getenv("POSTGRES_HOST", "localhost")
     pg_port: int = int(os.getenv("POSTGRES_PORT", "5432"))

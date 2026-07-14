@@ -1,6 +1,7 @@
 import base64
 import json
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -36,8 +37,10 @@ class FreeMessageQuota:
 
 
 def _build_fernet() -> Fernet:
-    key_material = settings.api_key_encryption_key.encode()[:32].ljust(32, b"\0")
-    encoded_key = base64.urlsafe_b64encode(key_material)
+    secret = settings.api_key_encryption_key.strip()
+    if not secret:
+        raise ValueError("API_KEY_ENCRYPTION_KEY must be configured for API key encryption.")
+    encoded_key = base64.urlsafe_b64encode(sha256(secret.encode()).digest())
     return Fernet(encoded_key)
 
 
@@ -54,9 +57,6 @@ def decrypt_api_key(encrypted_value: str | None) -> str:
     try:
         return _cipher.decrypt(encrypted_value.encode()).decode()
     except (InvalidToken, ValueError):
-        # Backward compatibility: allow plaintext values created before encryption.
-        if not encrypted_value.startswith("gAAAAA"):
-            return encrypted_value
         return ""
 
 
@@ -175,10 +175,9 @@ def get_chat_model_config(db: Session, user_id: str) -> ChatModelConfig:
 
     if row:
         stored_keys = _as_dict(row["provider_api_keys"])
-        # Only merge existing default keys that might be empty, then add EVERYTHING from the DB
         for provider, val in stored_keys.items():
             provider_api_keys[provider] = str(val or "")
-        
+
         all_models = _normalize_models(_as_list(row["all_models"]))
         selected_model = _normalize_selected_model(
             row.get("selected_model"),
