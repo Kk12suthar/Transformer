@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime
 
@@ -12,6 +13,14 @@ from app.schemas.session import SessionCreateRequest, SessionOut, SessionTableOu
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _quoted_identifier(identifier: str) -> str:
+    """Validate and quote an identifier; values cannot bind SQL identifiers."""
+    if not _SAFE_IDENTIFIER.fullmatch(identifier):
+        raise ValueError(f"Unsafe table identifier in session metadata: {identifier!r}")
+    return f'"{identifier}"'
 
 
 @router.post("/sessions", response_model=SessionOut)
@@ -77,17 +86,51 @@ def delete_session(
     if not db.execute(verify_q, {"session_id": session_id, "user_id": user["id"]}).first():
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Delete child rows first (messages, tables), then the session
-    for tbl in ("chat_messages", "session_tables"):
+    try:
+        # Discover every physical table through records explicitly owned by this
+        # session. UNION avoids dropping the same upload through two catalogs.
+        table_q = text(
+            f"""
+            SELECT table_name FROM {settings.app_schema}.session_tables
+            WHERE session_id = :sid
+            UNION
+            SELECT table_name FROM {settings.app_schema}.uploaded_files
+            WHERE session_id = :sid
+            UNION
+            SELECT table_name FROM {settings.uploads_schema}.table_registry
+            WHERE session_id = :sid
+            """
+        )
+        table_names = [row[0] for row in db.execute(table_q, {"sid": session_id}).all()]
+
+        # Validate the complete set before issuing any DDL. PostgreSQL's DROP
+        # TABLE is transactional, so any later error rolls back DDL and metadata.
+        quoted_schema = _quoted_identifier(settings.uploads_schema)
+        quoted_tables = [_quoted_identifier(name) for name in table_names]
+        for table_name in quoted_tables:
+            db.execute(text(f"DROP TABLE IF EXISTS {quoted_schema}.{table_name}"))
+
         db.execute(
-            text(f"DELETE FROM {settings.app_schema}.{tbl} WHERE session_id = :sid"),
+            text(
+                f"DELETE FROM {settings.uploads_schema}.table_registry "
+                "WHERE session_id = :sid"
+            ),
             {"sid": session_id},
         )
-    db.execute(
-        text(f"DELETE FROM {settings.app_schema}.chat_sessions WHERE id = :sid"),
-        {"sid": session_id},
-    )
-    db.commit()
+        # Keep explicit child cleanup for databases created before CASCADE FKs.
+        for tbl in ("chat_messages", "session_tables", "uploaded_files"):
+            db.execute(
+                text(f"DELETE FROM {settings.app_schema}.{tbl} WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+        db.execute(
+            text(f"DELETE FROM {settings.app_schema}.chat_sessions WHERE id = :sid"),
+            {"sid": session_id},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/sessions/{session_id}/tables", response_model=list[SessionTableOut])
