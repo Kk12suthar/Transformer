@@ -27,6 +27,7 @@ class RecordingSession:
         self._handler = handler
         self.executed: list[dict[str, Any]] = []
         self.commits = 0
+        self.rollbacks = 0
         self.closed = False
 
     def execute(self, statement: Any, params: dict[str, Any] | None = None) -> FakeResult:
@@ -45,6 +46,9 @@ class RecordingSession:
 
     def commit(self) -> None:
         self.commits += 1
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
 
     def close(self) -> None:
         self.closed = True

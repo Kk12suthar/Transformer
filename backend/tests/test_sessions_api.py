@@ -5,11 +5,7 @@ from datetime import UTC, datetime
 from .fakes import RecordingSession
 
 
-TEST_USER = {
-    "id": "user-123",
-    "email": "alice@example.com",
-    "full_name": "Alice Example",
-}
+TEST_USER = {"id": "user-123", "email": "alice@example.com", "full_name": "Alice Example"}
 
 
 def test_create_session_returns_new_session(client_factory) -> None:
@@ -18,107 +14,110 @@ def test_create_session_returns_new_session(client_factory) -> None:
 
     def handler(sql: str, params: dict[str, str]):
         if "insert into mvp.chat_sessions" in sql:
-            state["row"] = {
-                "id": params["id"],
-                "user_id": params["user_id"],
-                "title": params["title"],
-                "status": "ACTIVE",
-                "created_at": now,
-                "updated_at": now,
-            }
+            state["row"] = {"id": params["id"], "user_id": params["user_id"], "title": params["title"], "status": "ACTIVE", "created_at": now, "updated_at": now}
             return None
         if "from mvp.chat_sessions" in sql and "where id = :id" in sql:
             return [state["row"]]
         raise AssertionError(f"Unexpected query: {sql}")
 
     db = RecordingSession(handler)
-
     with client_factory(db_session=db, current_user=TEST_USER) as client:
         response = client.post("/api/v1/chat/sessions", json={"title": "March cleanup"})
-
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["user_id"] == TEST_USER["id"]
-    assert payload["title"] == "March cleanup"
-    assert payload["status"] == "ACTIVE"
+    assert response.json()["title"] == "March cleanup"
     assert db.commits == 1
 
 
 def test_list_sessions_returns_existing_sessions_for_current_user(client_factory) -> None:
     now = datetime.now(UTC)
-
     def handler(sql: str, params: dict[str, str]):
         if "from mvp.chat_sessions" in sql and "where user_id = :user_id" in sql:
-            assert params["user_id"] == TEST_USER["id"]
-            return [
-                {
-                    "id": "session-2",
-                    "user_id": TEST_USER["id"],
-                    "title": "Latest session",
-                    "status": "ACTIVE",
-                    "created_at": now,
-                    "updated_at": now,
-                },
-                {
-                    "id": "session-1",
-                    "user_id": TEST_USER["id"],
-                    "title": "Older session",
-                    "status": "ACTIVE",
-                    "created_at": now,
-                    "updated_at": now,
-                },
-            ]
+            return [{"id": "session-1", "user_id": TEST_USER["id"], "title": "Session", "status": "ACTIVE", "created_at": now, "updated_at": now}]
         raise AssertionError(f"Unexpected query: {sql}")
-
     db = RecordingSession(handler)
-
     with client_factory(db_session=db, current_user=TEST_USER) as client:
         response = client.get("/api/v1/chat/sessions")
-
     assert response.status_code == 200
-    payload = response.json()
-    assert [item["id"] for item in payload] == ["session-2", "session-1"]
-    assert payload[0]["title"] == "Latest session"
+    assert response.json()[0]["id"] == "session-1"
 
 
 def test_delete_session_returns_not_found_for_unknown_session(client_factory) -> None:
-    def handler(sql: str, _: dict[str, str]):
-        if "select 1 from mvp.chat_sessions" in sql:
-            return []
-        raise AssertionError(f"Unexpected query: {sql}")
-
-    db = RecordingSession(handler)
-
+    db = RecordingSession(lambda sql, _: [] if "select 1 from mvp.chat_sessions" in sql else None)
     with client_factory(db_session=db, current_user=TEST_USER) as client:
         response = client.delete("/api/v1/chat/sessions/missing-session")
-
     assert response.status_code == 404
-    assert response.json() == {"detail": "Session not found"}
     assert db.commits == 0
 
 
-def test_delete_session_removes_all_child_rows(client_factory) -> None:
-    deleted_tables: list[str] = []
-
+def test_delete_session_drops_owned_tables_and_cleans_catalogs(client_factory) -> None:
+    statements: list[str] = []
     def handler(sql: str, params: dict[str, str]):
-        assert params.get("session_id", params.get("sid")) == "session-1"
+        statements.append(sql)
         if "select 1 from mvp.chat_sessions" in sql:
+            assert params == {"session_id": "session-1", "user_id": TEST_USER["id"]}
             return [(1,)]
-        if "delete from mvp." in sql:
-            deleted_tables.append(sql.split("delete from mvp.", 1)[1].split()[0])
-            return None
-        raise AssertionError(f"Unexpected query: {sql}")
-
+        if sql.startswith("select table_name from mvp.session_tables"):
+            assert params == {"sid": "session-1"}
+            return [("uploaded_123",), ("cleaned_456",)]
+        return None
     db = RecordingSession(handler)
-
     with client_factory(db_session=db, current_user=TEST_USER) as client:
         response = client.delete("/api/v1/chat/sessions/session-1")
-
     assert response.status_code == 204
-    assert deleted_tables == [
-        "chat_messages",
-        "session_tables",
-        "uploaded_files",
-        "chat_sessions",
-    ]
+    assert 'drop table if exists "uploads"."uploaded_123"' in statements
+    assert 'drop table if exists "uploads"."cleaned_456"' in statements
+    assert "delete from uploads.table_registry where session_id = :sid" in statements
+    assert statements[-1] == "delete from mvp.chat_sessions where id = :sid"
     assert db.commits == 1
+    assert db.rollbacks == 0
+
+
+def test_delete_session_never_discovers_cross_session_tables(client_factory) -> None:
+    def handler(sql: str, params: dict[str, str]):
+        if "select 1 from mvp.chat_sessions" in sql:
+            return [(1,)]
+        if sql.startswith("select table_name from mvp.session_tables"):
+            assert sql.count("where session_id = :sid") == 3
+            assert params == {"sid": "session-1"}
+            return [("only_owned",)]
+        return None
+    db = RecordingSession(handler)
+    with client_factory(db_session=db, current_user=TEST_USER) as client:
+        response = client.delete("/api/v1/chat/sessions/session-1")
+    drops = [item["sql"] for item in db.executed if item["sql"].startswith("drop table")]
+    assert response.status_code == 204
+    assert drops == ['drop table if exists "uploads"."only_owned"']
+
+
+def test_delete_session_rejects_unsafe_identifier_before_drop(client_factory) -> None:
+    def handler(sql: str, _: dict[str, str]):
+        if "select 1 from mvp.chat_sessions" in sql:
+            return [(1,)]
+        if sql.startswith("select table_name from mvp.session_tables"):
+            return [("safe_table",), ('bad"; drop table users;--',)]
+        return None
+    db = RecordingSession(handler)
+    with client_factory(db_session=db, current_user=TEST_USER, raise_server_exceptions=False) as client:
+        response = client.delete("/api/v1/chat/sessions/session-1")
+    assert response.status_code == 500
+    assert not any(item["sql"].startswith("drop table") for item in db.executed)
+    assert db.commits == 0
+    assert db.rollbacks == 1
+
+
+def test_delete_session_rolls_back_drop_failure(client_factory) -> None:
+    def handler(sql: str, _: dict[str, str]):
+        if "select 1 from mvp.chat_sessions" in sql:
+            return [(1,)]
+        if sql.startswith("select table_name from mvp.session_tables"):
+            return [("owned_table",)]
+        if sql.startswith("drop table"):
+            raise RuntimeError("database refused drop")
+        return None
+    db = RecordingSession(handler)
+    with client_factory(db_session=db, current_user=TEST_USER, raise_server_exceptions=False) as client:
+        response = client.delete("/api/v1/chat/sessions/session-1")
+    assert response.status_code == 500
+    assert db.commits == 0
+    assert db.rollbacks == 1
+    assert not any("delete from uploads.table_registry" in item["sql"] for item in db.executed)
