@@ -77,8 +77,9 @@ def delete_session(
     if not db.execute(verify_q, {"session_id": session_id, "user_id": user["id"]}).first():
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Delete child rows first (messages, tables), then the session
-    for tbl in ("chat_messages", "session_tables"):
+    # Delete child rows first, then the session. Keep this explicit for databases
+    # created before the foreign keys gained ON DELETE CASCADE.
+    for tbl in ("chat_messages", "session_tables", "uploaded_files"):
         db.execute(
             text(f"DELETE FROM {settings.app_schema}.{tbl} WHERE session_id = :sid"),
             {"sid": session_id},

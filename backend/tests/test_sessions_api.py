@@ -95,3 +95,30 @@ def test_delete_session_returns_not_found_for_unknown_session(client_factory) ->
     assert response.status_code == 404
     assert response.json() == {"detail": "Session not found"}
     assert db.commits == 0
+
+
+def test_delete_session_removes_all_child_rows(client_factory) -> None:
+    deleted_tables: list[str] = []
+
+    def handler(sql: str, params: dict[str, str]):
+        assert params.get("session_id", params.get("sid")) == "session-1"
+        if "select 1 from mvp.chat_sessions" in sql:
+            return [(1,)]
+        if "delete from mvp." in sql:
+            deleted_tables.append(sql.split("delete from mvp.", 1)[1].split()[0])
+            return None
+        raise AssertionError(f"Unexpected query: {sql}")
+
+    db = RecordingSession(handler)
+
+    with client_factory(db_session=db, current_user=TEST_USER) as client:
+        response = client.delete("/api/v1/chat/sessions/session-1")
+
+    assert response.status_code == 204
+    assert deleted_tables == [
+        "chat_messages",
+        "session_tables",
+        "uploaded_files",
+        "chat_sessions",
+    ]
+    assert db.commits == 1
